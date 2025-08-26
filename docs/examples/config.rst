@@ -136,6 +136,7 @@ Actor/Rollout/Reference Policy
         rollout_rs_threshold: null # RS upper threshold
         rollout_rs_threshold_lower: null # RS lower threshold
         rollout_token_veto_threshold: null # Per-token veto (null to disable)
+      tis_imp_ratio_cap: -1 # set to positive values for Truncated Importance Sampling (requires setting `rollout.calculate_log_probs` as True)
       use_torch_compile: True # False to disable torch compile
       kl_loss_coef: 0.001 # for grpo
       kl_loss_type: low_var_kl # for grpo
