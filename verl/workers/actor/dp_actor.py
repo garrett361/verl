@@ -539,7 +539,7 @@ class DataParallelPPOActor(BasePPOActor):
                             entropy_coeff = 0
                         else:
                             entropy_coeff = min(
-                                self.config.entropy_coeff + entropy_coeff_delta, 
+                                self.config.entropy_coeff + entropy_coeff_delta,
                                 entropy_coeff_max
                             )
                             self.config.__dict__['entropy_coeff'] = entropy_coeff
@@ -581,14 +581,7 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         loss.backward()
 
-                    micro_batch_metrics.update(
-                        {
-                            "actor/pg_loss": pg_loss.detach().item(),
-                            "actor/pg_clipfrac": pg_clipfrac.detach().item(),
-                            "actor/ppo_kl": ppo_kl.detach().item(),
-                            "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
-                        }
-                    )
+                    micro_batch_metrics.update({"actor/pg_loss": pg_loss.detach().item()})
                     append_to_dict(metrics, micro_batch_metrics)
 
                 grad_norm = self._optimizer_step()
