@@ -91,6 +91,13 @@ class DataParallelPPOActor(BasePPOActor):
         else:
             self.scaler = None
 
+        assert self.config.dtype in ["float16", "float32", "bfloat16"]
+        if self.config.dtype == "float16":
+            from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+            self.scaler = ShardedGradScaler(growth_interval=400)
+        else:
+            self.scaler = None
+
     def _forward_micro_batch(
         self, micro_batch, temperature, calculate_entropy=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -106,7 +113,10 @@ class DataParallelPPOActor(BasePPOActor):
 
             multi_modal_inputs = extract_multi_modal_inputs(micro_batch["multi_modal_inputs"])
 
-        with torch.autocast(device_type=self.device_name, dtype=self.param_dtype):
+        # with torch.autocast(device_type=self.device_name, dtype=torch.bfloat16):
+        from verl.utils.torch_dtypes import PrecisionType
+        torch_dtype = PrecisionType.to_dtype(self.config.dtype)
+        with torch.autocast(device_type=self.device_name, dtype=torch_dtype):
             input_ids = micro_batch["input_ids"]
             batch_size, seqlen = input_ids.shape
             attention_mask = micro_batch["attention_mask"]
@@ -282,8 +292,10 @@ class DataParallelPPOActor(BasePPOActor):
 
     def _optimizer_step(self):
         assert self.config.grad_clip is not None
+
         if self.scaler is not None:
             self.scaler.unscale_(self.actor_optimizer)
+
         if isinstance(self.actor_module, FSDP):
             grad_norm = self.actor_module.clip_grad_norm_(max_norm=self.config.grad_clip)
         elif isinstance(self.actor_module, FSDPModule):
@@ -295,6 +307,7 @@ class DataParallelPPOActor(BasePPOActor):
             grad_norm = grad_norm.full_tensor()
 
         # if grad_norm is not finite, skip the update
+
         if self.scaler is not None:
             self.scaler.step(self.actor_optimizer)
             self.scaler.update()
@@ -393,6 +406,12 @@ class DataParallelPPOActor(BasePPOActor):
         # Include rollout_log_probs for computing rollout_corr metrics in bypass mode
         if "rollout_log_probs" in data.batch.keys():
             select_keys.append("rollout_log_probs")
+        if self.config.tis_imp_ratio_cap > 0:
+            assert "rollout_log_probs" in data.batch.keys(), (
+                "Truncated Importance Sampling (TIS) requires to configure "
+                "`actor_rollout_ref.rollout.calculate_log_probs=True` "
+                "and is not currently supported in Server mode (agent loop)."
+            )
 
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
         non_tensor_select_keys = ["multi_modal_inputs"] if has_multi_modal_inputs else []
@@ -408,6 +427,13 @@ class DataParallelPPOActor(BasePPOActor):
         metrics = {}
         for _ in range(self.config.ppo_epochs):
             for batch_idx, mini_batch in enumerate(mini_batches):
+                if torch.distributed.get_rank() == 0:
+                    if batch_idx == 0:
+                        print(f"Performing ON-policy update ({batch_idx=})")
+                    else:
+                        print(f"Performing OFF-policy update ({batch_idx=})")
+
+
                 if self.config.use_dynamic_bsz:
                     max_token_len = self.config.ppo_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
                     micro_batches, _ = prepare_dynamic_batch(mini_batch, max_token_len=max_token_len)
@@ -425,10 +451,19 @@ class DataParallelPPOActor(BasePPOActor):
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                     response_mask = model_inputs["response_mask"]
                     old_log_prob = model_inputs["old_log_probs"]
+                    rollout_log_probs = model_inputs["rollout_log_probs"] if self.config.tis_imp_ratio_cap > 0 else None
                     advantages = model_inputs["advantages"]
 
                     entropy_coeff = self.config.entropy_coeff
                     loss_agg_mode = self.config.loss_agg_mode
+                    use_adaptive_entropy_adjustment = self.config.get("use_adaptive_entropy_adjustment", False)
+                    target_entropy = self.config.get("target_entropy", None)
+                    entropy_coeff_delta = self.config.get("entropy_coeff_delta", None)
+                    entropy_coeff_max = self.config.get("entropy_coeff_max", None)
+                    if use_adaptive_entropy_adjustment:
+                        assert target_entropy is not None, f"target_entropy must be provided if {use_adaptive_entropy_adjustment=}, but got None."
+                        assert entropy_coeff_delta is not None, f"entropy_coeff_delta must be provided if {use_adaptive_entropy_adjustment=}, but got None."
+                        assert entropy_coeff_max is not None, f"entropy_coeff_max must be provided if {use_adaptive_entropy_adjustment=}, but got None."
 
                     calculate_entropy = self.config.calculate_entropy or (entropy_coeff != 0)
 
@@ -438,6 +473,9 @@ class DataParallelPPOActor(BasePPOActor):
                         loss_scale_factor = 1 / self.gradient_accumulation
 
                     # all return: (bsz, response_length)
+                    calculate_entropy = False
+                    if entropy_coeff != 0 or use_adaptive_entropy_adjustment:
+                        calculate_entropy = True
                     entropy, log_prob = self._forward_micro_batch(
                         model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
                     )
@@ -471,6 +509,7 @@ class DataParallelPPOActor(BasePPOActor):
                         loss_agg_mode=loss_agg_mode,
                         config=self.config,
                         rollout_is_weights=rollout_is_weights,
+                        rollout_log_probs=rollout_log_probs,
                     )
                     micro_batch_metrics.update(pg_metrics)
 
@@ -494,6 +533,31 @@ class DataParallelPPOActor(BasePPOActor):
                         micro_batch_metrics["actor/entropy"] = entropy_agg.detach().item()
                         if entropy_coeff != 0:
                             policy_loss -= entropy_agg * entropy_coeff
+                    if use_adaptive_entropy_adjustment:
+                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        if entropy_loss.detach().item() > target_entropy:
+                            entropy_coeff = 0
+                        else:
+                            entropy_coeff = min(
+                                self.config.entropy_coeff + entropy_coeff_delta,
+                                entropy_coeff_max
+                            )
+                            self.config.__dict__['entropy_coeff'] = entropy_coeff
+                        # compute policy loss
+                        if entropy_coeff != 0:
+                            policy_loss = pg_loss - entropy_loss * entropy_coeff
+                        else:
+                            policy_loss = pg_loss
+                        metrics["actor/entropy_coeff"] = entropy_coeff
+                        metrics["actor/entropy_loss"] = entropy_loss.detach().item()
+                    else:
+                        if entropy_coeff == 0:
+                            policy_loss = pg_loss
+                        else:
+                            entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                            policy_loss = pg_loss - entropy_loss * entropy_coeff
+                            metrics["actor/entropy_coeff"] = entropy_coeff
+                            metrics["actor/entropy_loss"] = entropy_loss.detach().item()
 
                     if self.config.use_kl_loss:
                         ref_log_prob = model_inputs["ref_log_prob"]
@@ -504,7 +568,7 @@ class DataParallelPPOActor(BasePPOActor):
                         kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 
                         policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
-                        micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
+                        micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item()
                         micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
 
                     if self.config.use_dynamic_bsz:
@@ -517,7 +581,7 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         loss.backward()
 
-                    micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * loss_scale_factor
+                    micro_batch_metrics.update({"actor/pg_loss": pg_loss.detach().item()})
                     append_to_dict(metrics, micro_batch_metrics)
 
                 grad_norm = self._optimizer_step()

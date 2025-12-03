@@ -22,6 +22,7 @@ from typing import Any, Callable
 import numpy as np
 import torch
 
+import verl.utils.torch_functional as verl_F
 from verl import DataProto
 from verl.utils.import_utils import deprecated
 
@@ -104,6 +105,16 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
     sequence_score = batch.batch["token_level_scores"].sum(-1)
     sequence_reward = batch.batch["token_level_rewards"].sum(-1)
 
+    # NOTE: @goon -  sequence_reward will include the whatever score we might assign to overlong
+    # answers, which does not directly reflect task perf. Also compute the rewards with overlong
+    # entries zeroed out.
+    # Assumption: zero means wrong.
+    if "overlong" in batch.non_tensor_batch:
+        overlong_mask = torch.from_numpy(batch.non_tensor_batch["overlong"]).to(device=sequence_reward.device)
+        sequence_reward_overlong_masked = sequence_reward.masked_fill(overlong_mask, 0.0)
+    else:
+        overlong_mask = sequence_reward_overlong_masked = None
+
     advantages = batch.batch["advantages"]
     returns = batch.batch["returns"]
 
@@ -122,15 +133,10 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
     non_aborted_mask = ~aborted_mask
 
     non_aborted_sequence_score = sequence_score[non_aborted_mask]
-    non_aborted_sequence_reward = sequence_reward[non_aborted_mask]
 
     score_mean = torch.mean(non_aborted_sequence_score).detach().item()
     score_max = torch.max(non_aborted_sequence_score).detach().item()
     score_min = torch.min(non_aborted_sequence_score).detach().item()
-
-    reward_mean = torch.mean(non_aborted_sequence_reward).detach().item()
-    reward_max = torch.max(non_aborted_sequence_reward).detach().item()
-    reward_min = torch.min(non_aborted_sequence_reward).detach().item()
 
     valid_adv = torch.masked_select(advantages, response_mask)
     valid_returns = torch.masked_select(returns, response_mask)
@@ -162,9 +168,9 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
         "critic/score/max": score_max,
         "critic/score/min": score_min,
         # reward
-        "critic/rewards/mean": reward_mean,
-        "critic/rewards/max": reward_max,
-        "critic/rewards/min": reward_min,
+        "critic/rewards/mean": torch.mean(sequence_reward).detach().item(),
+        "critic/rewards/max": torch.max(sequence_reward).detach().item(),
+        "critic/rewards/min": torch.min(sequence_reward).detach().item(),
         # adv
         "critic/advantages/mean": torch.mean(valid_adv).detach().item(),
         "critic/advantages/max": torch.max(valid_adv).detach().item(),
@@ -207,6 +213,38 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
         "prompt_length/min": torch.min(prompt_length).detach().item(),
         "prompt_length/clip_ratio": torch.mean(torch.eq(prompt_length, max_prompt_length).float()).detach().item(),
     }
+
+    if sequence_reward_overlong_masked is not None:
+        metrics["critic/rewards_overlong_masked/mean"] = torch.mean(sequence_reward_overlong_masked).detach().item()
+        metrics["critic/rewards_overlong_masked/max"] = torch.max(sequence_reward_overlong_masked).detach().item()
+        metrics["critic/rewards_overlong_masked/min"] = torch.min(sequence_reward_overlong_masked).detach().item()
+
+    if "rollout_log_probs" in batch.batch:
+        # NOTE: @goon -  compute the KL diverences using two methods:
+        # 1) Same way as core_algo.py
+        # 2) Through Schulman's unbiased estimators: http://joschu.net/blog/kl-approx.html
+
+        # We compute:
+        # a) KL[q_vllm, p_fsdp] = E_{x~q_vllm}[ln(p_fsdp/q_vllm)]
+        # b) KL[p_fsdp, q_vllm] = E_{x~p_fsdp}[ln(q_vllm/p_fsdp)] = E_{x~p_fsdp}[q_vllm/p_fsdp *  ln(q_vllm/p_fsdp)]
+        # Plus additional terms whose expectation is zero in the case of Schulman's method.
+
+        # NOTE: @goon - we assume temp = 1.0 here.
+
+        vllm_logits = batch.batch["rollout_log_probs"]
+        fsdp_logits = batch.batch["old_log_probs"]
+        response_mask = batch.batch["response_mask"]
+        # Follow core_algos.py an clamp
+        fsdp_vllm_logits_diff = torch.clamp(fsdp_logits - vllm_logits, min=-20.0, max=20.0)
+        fsdp_vllm_ratio = fsdp_vllm_logits_diff.exp()
+        core_algo_kl_vllm_fsdp = -1 * verl_F.masked_mean(fsdp_vllm_logits_diff, response_mask)
+        core_algo_kl_fsdp_vllm = verl_F.masked_mean(fsdp_vllm_ratio * fsdp_vllm_logits_diff, response_mask)
+        js_kl_vllm_fsdp = core_algo_kl_vllm_fsdp + verl_F.masked_mean(fsdp_vllm_ratio - 1, response_mask)
+        js_kl_fsdp_vllm = core_algo_kl_fsdp_vllm + verl_F.masked_mean(1 - fsdp_vllm_ratio, response_mask)
+        metrics["kl/core_algo/vllm_fsdp"] = core_algo_kl_vllm_fsdp.detach().item()
+        metrics["kl/core_algo/fsdp_vllm"] = core_algo_kl_fsdp_vllm.detach().item()
+        metrics["kl/js/vllm_fsdp"] = js_kl_vllm_fsdp.detach().item()
+        metrics["kl/js/fsdp_vllm"] = js_kl_fsdp_vllm.detach().item()
 
     # multi-turn conversation
     if "__num_turns__" in batch.non_tensor_batch:

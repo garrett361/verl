@@ -14,6 +14,9 @@ rollout_n: ${oc.select:actor_rollout_ref.rollout.n,1}
 # fsdp, fsdp2 or megatron. must be set.
 strategy: ???
 
+# need to be set for changing dtype
+dtype: bfloat16
+
 # Split each sample into sub-batches of this size for PPO
 ppo_mini_batch_size: 256
 
@@ -83,9 +86,18 @@ entropy_coeff: 0
 
 # When true, the actor forward will request entropy from the model
 calculate_entropy: false
+# Truncated Importance Sampling (TIS): https://fengyao.notion.site/off-policy-rl
+# the truncation value C of truncated Importance Sampling (-1 for disable TIS)
+tis_imp_ratio_cap: -1
 
 # Whether to use KL loss instead of KL reward penalty. True for GRPO
 use_kl_loss: false
+
+# test
+target_entropy: 0.5 # target entropy for adaptive entropy control in Skywork-OR1-32B
+use_adaptive_entropy_adjustment: False # adaptive entropy control in Skywork-OR1-32B
+entropy_coeff_delta: 0.00005 # entropy_coeff_delta for adaptive entropy control in Skywork-OR1-32B
+entropy_coeff_max: 0.005 # entropy_coeff_max for adaptive entropy control in Skywork-OR1-32B
 
 # Whether to use torch.compile()
 # oc.select: the default val for ref.use_torch_compile

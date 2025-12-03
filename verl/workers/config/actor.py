@@ -113,8 +113,13 @@ class ActorConfig(BaseConfig):
     loss_scale_factor: Optional[int] = None
     entropy_coeff: float = 0
     calculate_entropy: bool = False
+    tis_imp_ratio_cap: float = -1
     use_kl_loss: bool = False
     use_torch_compile: bool = True
+    target_entropy: float = 0.5
+    use_adaptive_entropy_adjustment: bool = False
+    entropy_coeff_delta: float = 0.00005
+    entropy_coeff_max: float = 0.005
     kl_loss_coef: float = 0.001
     kl_loss_type: str = "low_var_kl"
     ppo_epochs: int = 1
@@ -242,6 +247,7 @@ class FSDPActorConfig(ActorConfig):
 
     strategy: str = "fsdp"
     grad_clip: float = 1.0
+    dtype: str = 'bfloat16'
     ulysses_sequence_parallel_size: int = 1
     entropy_from_logits_with_chunking: bool = False
     entropy_checkpointing: bool = False

@@ -910,9 +910,10 @@ def compute_policy_loss_vanilla(
     advantages: torch.Tensor,
     response_mask: torch.Tensor,
     loss_agg_mode: str = "token-mean",
-    config: Optional[ActorConfig] = None,
+    config: Optional[DictConfig | AlgoConfig] = None,
+    rollout_log_probs=None,
     rollout_is_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, dict[str, Any]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute the clipped policy objective and related metrics for PPO.
 
@@ -959,6 +960,9 @@ def compute_policy_loss_vanilla(
     negative_approx_kl = torch.clamp(negative_approx_kl, min=-20.0, max=20.0)
     ratio = torch.exp(negative_approx_kl)
     ppo_kl = verl_F.masked_mean(-negative_approx_kl, response_mask)
+    # NOTE: @goon -  add an expectation-zero term which ensures a positive estimator
+    # http://joschu.net/blog/kl-approx.html
+    ppo_kl += verl_F.masked_mean(ratio - 1, response_mask)
 
     pg_losses1 = -advantages * ratio
     if cliprange_low is None:
@@ -980,6 +984,14 @@ def compute_policy_loss_vanilla(
     )
 
     pg_losses = torch.where(advantages < 0, clip_pg_losses2, clip_pg_losses1)
+
+    if config.tis_imp_ratio_cap > 0 and rollout_log_probs is not None:
+        # Apply truncated importance sampling -> https://fengyao.notion.site/off-policy-rl
+        tis_imp_ratio = torch.exp(old_log_prob - rollout_log_probs)
+        tis_imp_ratio = torch.clamp(tis_imp_ratio, max=config.tis_imp_ratio_cap)
+        pg_losses = pg_losses * tis_imp_ratio
+
+    pg_loss = agg_loss(loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 
     # Apply rollout correction weights if provided
     if rollout_is_weights is not None:
@@ -1004,8 +1016,8 @@ def compute_policy_loss_gspo(
     advantages: torch.Tensor,
     response_mask: torch.Tensor,
     loss_agg_mode: str = "seq-mean-token-mean",
-    config: Optional[ActorConfig] = None,
-    rollout_is_weights: torch.Tensor | None = None,
+    config: Optional[DictConfig | ActorConfig] = None,
+    rollout_log_probs=None,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute the clipped policy objective and related metrics for GSPO.
