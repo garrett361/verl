@@ -7,8 +7,6 @@ from math_verify.parser import (
     NormalizationConfig,
 )
 
-from verl.workers.reward_manager import register as register
-
 normalization_config = NormalizationConfig(
     basic_latex=True,
     units=True,

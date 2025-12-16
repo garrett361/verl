@@ -15,7 +15,7 @@ from math_verify.parser import (
 from tqdm import tqdm
 
 from verl import DataProto
-from verl.utils.reward_score.custom import custom_compute_score
+from verl.utils.reward_score.custom.custom import custom_compute_score
 from verl.workers.reward_manager import register as register
 from verl.workers.reward_manager.abstract import AbstractRewardManager
 

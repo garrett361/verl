@@ -4,7 +4,7 @@ from collections.abc import Callable
 from verl import DataProto
 from verl.experimental.reward.reward_loop.base import RewardLoopManagerBase
 from verl.experimental.reward.reward_loop.registry import register
-from verl.utils.reward_score.custom import custom_compute_score
+from verl.utils.reward_score.custom.custom import custom_compute_score
 
 
 # function for finding repetitions
