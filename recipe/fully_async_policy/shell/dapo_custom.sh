@@ -80,7 +80,7 @@ partial_rollout=True
 ray job submit --no-wait \
     --working-dir "$PWD" \
     --submission-id "verl" \
-    python -m recipe.fully_async_policy.fully_async_main \
+    -- python -m recipe.fully_async_policy.fully_async_main \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="${TEST_FILE}" \
     data.prompt_key=prompt \
