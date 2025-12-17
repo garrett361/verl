@@ -38,7 +38,7 @@ clip_ratio_low=0.2
 clip_ratio_high=0.28
 
 # Response length parameters
-max_prompt_length=$((1024 * 2))
+max_prompt_length=$((1024 * 4))
 max_response_length=$((1024 * 8))
 enable_overlong_buffer=${enable_overlong_buffer:-True}
 overlong_buffer_len=$((1024 * 4))
