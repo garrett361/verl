@@ -2,7 +2,8 @@
 set -xeuo pipefail
 
 project_name=${project_name:-"verl-async-dev"}
-exp_name='deepseek-ai/DeepSeek-R1-Distill-Qwen-7B'
+# NOTE: @goon - dev name DELETE
+# exp_name='deepseek-ai/DeepSeek-R1-Distill-Qwen-7B'
 exp_name=${exp_name:-"async-dev-$(date "+%Y-%m-%d-%H-%M")"}
 
 # Ray
@@ -13,6 +14,7 @@ RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # very important! please modify the max_position_embeddings in config.json to 32768 after downloading from huggingface
 MODEL_PATH=${MODEL_PATH:-"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"}
+# MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-0.5B-Instruct"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
 TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo-math-17k.parquet"}
 TEST_FILE=${TEST_FILE:-"${RAY_DATA_HOME}/data/aime-2024.parquet"}
@@ -37,13 +39,13 @@ clip_ratio_high=0.28
 
 # Response length parameters
 max_prompt_length=$((1024 * 2))
-max_response_length=$((1024 * 28))
-enable_overlong_buffer=True
+max_response_length=$((1024 * 8))
+enable_overlong_buffer=${enable_overlong_buffer:-True}
 overlong_buffer_len=$((1024 * 4))
-overlong_penalty_factor=1.0
+overlong_penalty_factor=${overlong_penalty_factor:-1.0}
 
 # Training parameters
-loss_agg_mode="token-mean"
+loss_agg_mode=${loss_agg_mode:-"token-mean"}
 
 # Algorithm
 temperature=1.0
@@ -57,9 +59,9 @@ actor_ppo_max_token_len=$(((max_prompt_length + max_response_length) * 2))
 infer_ppo_max_token_len=$(((max_prompt_length + max_response_length) * 3))
 ref_offload=True
 actor_offload=False
-gen_tp=4
-sp_size=4
-fsdp_size=8
+gen_tp=${gen_tp:-4}
+sp_size=${sp_size:-4}
+fsdp_size=${fsdp_size:-8}
 
 # Fully async specific parameters
 NNODES_ROLLOUT=${NNODES_ROLLOUT:-8}
@@ -68,8 +70,8 @@ NGPUS_PER_NODE=${NGPUS_PER_NODE:-8}
 
 train_prompt_bsz=0
 gen_prompt_bsz=1
-n_resp_per_prompt=16
-train_prompt_mini_bsz=32
+n_resp_per_prompt=${n_resp_per_prompt:-16}
+train_prompt_mini_bsz=${train_prompt_mini_bsz:-32}
 total_rollout_steps=$(((512*400)))
 test_freq=20
 staleness_threshold=0.5
@@ -145,7 +147,7 @@ ray job submit --no-wait \
     +reward_model.reward_kwargs.overlong_buffer_cfg.penalty_factor=${overlong_penalty_factor} \
     +reward_model.reward_kwargs.overlong_buffer_cfg.log=False \
     +reward_model.reward_kwargs.max_resp_len=${max_response_length} \
-    trainer.logger=['console','tensorboard'] \
+    trainer.logger=['console','wandb'] \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.val_before_train=True \
