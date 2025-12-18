@@ -122,7 +122,7 @@ ray job submit --no-wait \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.actor.optim.lr_warmup_steps=$lr_warmup_steps \
-    actor_rollout_ref.actor.optim.weight_decay=$weight_decay
+    actor_rollout_ref.actor.optim.weight_decay=0.1 \
     actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
     actor_rollout_ref.actor.fsdp_config.param_offload=${actor_offload} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${actor_offload} \
