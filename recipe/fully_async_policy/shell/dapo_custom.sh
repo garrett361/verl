@@ -54,6 +54,10 @@ top_p=1.0
 top_k=-1 # 0 for HF rollout, -1 for vLLM rollout
 val_top_p=0.7
 
+lr=${lr:-1e-6}
+lr_warmup_steps=${lr_warmup_steps:-10}
+weight_decay=${weight_decay:-0.1}
+
 # Performance Related Parameter
 use_dynamic_bsz=True
 actor_ppo_max_token_len=$(((max_prompt_length + max_response_length) * 2))
@@ -116,9 +120,9 @@ ray job submit --no-wait \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${infer_ppo_max_token_len} \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${infer_ppo_max_token_len} \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
-    actor_rollout_ref.actor.optim.weight_decay=0.1 \
+    actor_rollout_ref.actor.optim.lr=$lr \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=$lr_warmup_steps \
+    actor_rollout_ref.actor.optim.weight_decay=$weight_decay
     actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
     actor_rollout_ref.actor.fsdp_config.param_offload=${actor_offload} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${actor_offload} \
