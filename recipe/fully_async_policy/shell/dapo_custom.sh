@@ -53,6 +53,7 @@ temperature=1.0
 top_p=1.0
 top_k=-1 # 0 for HF rollout, -1 for vLLM rollout
 val_top_p=0.7
+save_freq=${save_freq:--1}
 
 lr=${lr:-1e-6}
 lr_warmup_steps=${lr_warmup_steps:-10}
@@ -158,7 +159,7 @@ ray job submit --no-wait \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.val_before_train=True \
-    trainer.save_freq=-1 \
+    trainer.save_freq=${save_freq} \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto \
     trainer.nnodes="${NNODES_TRAIN}" \
