@@ -3,8 +3,7 @@ set -xeuo pipefail
 
 project_name=${project_name:-"verl-async-dev"}
 # NOTE: @goon - dev name DELETE
-# exp_name='deepseek-ai/DeepSeek-R1-Distill-Qwen-7B'
-exp_name=${exp_name:-"async-dev-$(date "+%Y-%m-%d-%H-%M")"}
+exp_name=${exp_name:-"async-dev-${WORLD_SIZE}node-$(date "+%Y-%m-%d-%H-%M")"}
 
 # Ray
 RAY_ADDRESS=${RAY_ADDRESS:-"http://localhost:8265"}
@@ -74,10 +73,12 @@ n_resp_per_prompt=${n_resp_per_prompt:-16}
 train_prompt_mini_bsz=${train_prompt_mini_bsz:-32}
 total_rollout_steps=$(((512*400)))
 test_freq=20
-staleness_threshold=0.5
-trigger_parameter_sync_step=4
-require_batches=4
-partial_rollout=True
+
+# Async settings
+staleness_threshold=${staleness_threshold:-0.5}
+trigger_parameter_sync_step=${trigger_parameter_sync_step:-4}
+require_batches=${require_batches:-4}
+partial_rollout=${partial_rollout:-True}
 
 ray job submit --no-wait \
     --working-dir "$PWD" \
