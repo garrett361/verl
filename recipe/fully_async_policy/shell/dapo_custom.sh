@@ -71,8 +71,8 @@ train_prompt_bsz=0
 gen_prompt_bsz=1
 n_resp_per_prompt=${n_resp_per_prompt:-16}
 train_prompt_mini_bsz=${train_prompt_mini_bsz:-32}
-total_rollout_steps=$(((512*400)))
-test_freq=20
+total_rollout_steps=${total_rollout_steps:-$((512*400))}
+test_freq=${test_freq:-20}
 
 # Async settings
 staleness_threshold=${staleness_threshold:-0.5}
