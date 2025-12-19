@@ -68,6 +68,7 @@ actor_offload=False
 gen_tp=${gen_tp:-4}
 sp_size=${sp_size:-4}
 fsdp_size=${fsdp_size:-8}
+gpu_memory_utilization=${gpu_memory_utilization:-0.80}
 
 # Fully async specific parameters
 NNODES_ROLLOUT=${NNODES_ROLLOUT:-8}
@@ -132,7 +133,7 @@ ray job submit --no-wait \
     actor_rollout_ref.actor.grad_clip=1.0 \
     actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode} \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=${sp_size} \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=${gpu_memory_utilization} \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${gen_tp} \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
     actor_rollout_ref.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \
